@@ -28,7 +28,9 @@ const state = {
 
 const els = {
   fileInput: document.getElementById("fileInput"),
+  encodingSelect: document.getElementById("encodingSelect"),
   loadDemo: document.getElementById("loadDemo"),
+  clearShelf: document.getElementById("clearShelf"),
   bookList: document.getElementById("bookList"),
   reader: document.getElementById("reader"),
   readerEmpty: document.getElementById("readerEmpty"),
@@ -110,12 +112,13 @@ function splitTextIntoItems(text) {
   return { title, items };
 }
 
-function makeBookFromText(fileName, text) {
+function makeBookFromText(fileName, text, encodingLabel = "auto") {
   const parsed = splitTextIntoItems(text);
   return {
     id: uid("book"),
     title: parsed.title || fileName.replace(/\.(txt|md|markdown)$/i, ""),
     sourceName: fileName,
+    encoding: encodingLabel,
     kind: "text",
     createdAt: new Date().toISOString(),
     items: parsed.items
@@ -133,12 +136,74 @@ function makeBookFromImages(files) {
   };
 }
 
+function decodeWithLabel(buffer, label, options = {}) {
+  const decoder = new TextDecoder(label, { fatal: !!options.fatal });
+  return decoder.decode(buffer);
+}
+
+function detectBom(bytes) {
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return "utf-8";
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) return "utf-16le";
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) return "utf-16be";
+  return null;
+}
+
+function scoreDecodedText(text) {
+  const replacement = (text.match(/�/g) || []).length;
+  const mojibakeWords = (text.match(/锟斤拷|ï¿½|Ã.|Â.|ä¸|æ.|å.|ç.|è.|é./g) || []).length;
+  const controls = (text.match(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g) || []).length;
+  const latin1 = (text.match(/[\u00c0-\u00ff]/g) || []).length;
+  const cjk = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  const length = Math.max(text.length, 1);
+  let score = replacement * 100 + mojibakeWords * 35 + controls * 30;
+  if (latin1 > cjk * 2 && latin1 / length > 0.04) score += latin1 * 3;
+  if (cjk > 0) score -= Math.min(cjk, 200) * 0.2;
+  return score;
+}
+
+function decodeTextBuffer(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const selected = els.encodingSelect?.value || "auto";
+
+  if (selected !== "auto") {
+    try {
+      return { text: decodeWithLabel(buffer, selected), encoding: selected };
+    } catch (error) {
+      console.warn(`Manual encoding ${selected} failed`, error);
+      return { text: decodeWithLabel(buffer, "utf-8"), encoding: "utf-8 fallback" };
+    }
+  }
+
+  const bom = detectBom(bytes);
+  if (bom) return { text: decodeWithLabel(buffer, bom), encoding: `${bom} BOM` };
+
+  const candidates = [];
+  for (const label of ["utf-8", "gb18030", "utf-16le", "utf-16be"]) {
+    try {
+      const text = decodeWithLabel(buffer, label, { fatal: label === "utf-8" });
+      candidates.push({ label, text, score: scoreDecodedText(text) });
+    } catch (error) {
+      candidates.push({ label, text: "", score: Number.POSITIVE_INFINITY });
+    }
+  }
+
+  candidates.sort((a, b) => a.score - b.score);
+  const best = candidates[0];
+  return { text: best.text, encoding: `${best.label} auto` };
+}
+
 function readFileAsText(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onload = () => {
+      try {
+        resolve(decodeTextBuffer(reader.result));
+      } catch (error) {
+        reject(error);
+      }
+    };
     reader.onerror = reject;
-    reader.readAsText(file, "utf-8");
+    reader.readAsArrayBuffer(file);
   });
 }
 
@@ -161,7 +226,8 @@ function renderBookList() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = `book-card ${book.id === state.activeBookId ? "active" : ""}`;
-    btn.innerHTML = `<strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.sourceName || book.kind)} · ${book.items.length} 段/页</small>`;
+    const meta = [book.sourceName || book.kind, book.encoding, `${book.items.length} 段/页`].filter(Boolean).join(" · ");
+    btn.innerHTML = `<strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(meta)}</small>`;
     btn.addEventListener("click", () => openBook(book.id));
     els.bookList.appendChild(btn);
   }
@@ -205,7 +271,8 @@ function renderReader() {
 
   const title = document.createElement("header");
   title.className = "reader-title";
-  title.innerHTML = `<h2>${escapeHtml(book.title)}</h2><p>${escapeHtml(book.sourceName || "本地导入")}</p>`;
+  const sourceMeta = [book.sourceName || "本地导入", book.encoding].filter(Boolean).join(" · ");
+  title.innerHTML = `<h2>${escapeHtml(book.title)}</h2><p>${escapeHtml(sourceMeta)}</p>`;
   els.reader.appendChild(title);
 
   for (const item of book.items) {
@@ -337,7 +404,7 @@ function exportNotes() {
   const book = getActiveBook();
   if (!book) return alert("先打开一本书哦。");
   const marks = getBookMarks(book.id);
-  const lines = [`# ${book.title}｜批注导出`, "", `来源：${book.sourceName || "本地导入"}`, `导出时间：${new Date().toLocaleString("zh-CN")}`, ""];
+  const lines = [`# ${book.title}｜批注导出`, "", `来源：${book.sourceName || "本地导入"}`, `编码：${book.encoding || "未知"}`, `导出时间：${new Date().toLocaleString("zh-CN")}`, ""];
   for (const item of book.items) {
     const mark = marks[item.id];
     if (!mark || (!mark.bookmark && !mark.highlight && !mark.notes?.length)) continue;
@@ -365,8 +432,8 @@ async function handleFiles(files) {
   const imageFiles = Array.from(files).filter(file => file.type.startsWith("image/"));
 
   for (const file of textFiles) {
-    const text = await readFileAsText(file);
-    state.books.unshift(makeBookFromText(file.name, text));
+    const decoded = await readFileAsText(file);
+    state.books.unshift(makeBookFromText(file.name, decoded.text, decoded.encoding));
   }
 
   if (imageFiles.length) {
@@ -387,9 +454,22 @@ async function handleFiles(files) {
 }
 
 function loadDemo() {
-  const book = makeBookFromText("welcome.md", demoText);
+  const book = makeBookFromText("welcome.md", demoText, "utf-8 demo");
   state.books.unshift(book);
   state.activeBookId = book.id;
+  save();
+  renderAll();
+}
+
+function clearShelf() {
+  const ok = confirm("要清空本地小书架吗？这会删除本机导入的书和本地批注。已经导出的文件不受影响。");
+  if (!ok) return;
+  state.books = [];
+  state.activeBookId = null;
+  state.selectedItemId = null;
+  state.selectedText = "";
+  state.notes = {};
+  els.noteInput.value = "";
   save();
   renderAll();
 }
@@ -413,6 +493,7 @@ function renderAll() {
 
 els.fileInput.addEventListener("change", event => handleFiles(event.target.files));
 els.loadDemo.addEventListener("click", loadDemo);
+els.clearShelf.addEventListener("click", clearShelf);
 els.bookmarkBtn.addEventListener("click", () => toggleMark("bookmark"));
 els.highlightBtn.addEventListener("click", () => toggleMark("highlight"));
 els.saveNote.addEventListener("click", saveNote);

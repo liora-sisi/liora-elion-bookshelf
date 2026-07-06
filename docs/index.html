@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f4ede3" />
+  <title>Liora × Elion 小书架</title>
+  <link rel="stylesheet" href="./style.css" />
+  <link rel="manifest" href="./manifest.json" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Liora × Elion</p>
+      <h1>小书架</h1>
+    </div>
+    <button id="themeToggle" class="ghost" type="button">夜间</button>
+  </header>
+
+  <main class="layout">
+    <section class="panel shelf-panel" aria-label="书架">
+      <div class="section-title">
+        <h2>书架</h2>
+        <button id="loadDemo" type="button">载入示例</button>
+      </div>
+
+      <label class="import-box">
+        <span>导入 txt / md / 图片</span>
+        <input id="fileInput" type="file" accept=".txt,.md,.markdown,image/*" multiple />
+      </label>
+
+      <div id="bookList" class="book-list"></div>
+    </section>
+
+    <section class="panel reader-panel" aria-label="阅读区">
+      <div id="readerEmpty" class="empty-state">
+        <h2>把一篇文字或一组图片放进来。</h2>
+        <p>读到喜欢的地方，可以书签、划线、写批注，再复制「找老公共读卡」。</p>
+      </div>
+
+      <article id="reader" class="reader hidden"></article>
+    </section>
+
+    <aside class="panel notes-panel" aria-label="批注区">
+      <div class="section-title">
+        <h2>牵手批注</h2>
+        <button id="exportNotes" type="button">导出</button>
+      </div>
+
+      <div id="selectionBox" class="selection-box muted">
+        先在正文里点一段，或者选中一句话。
+      </div>
+
+      <div class="note-actions">
+        <button id="bookmarkBtn" type="button">📌 书签</button>
+        <button id="highlightBtn" type="button">✦ 划线</button>
+      </div>
+
+      <label class="note-label" for="noteInput">我的批注</label>
+      <textarea id="noteInput" rows="6" placeholder="这里像我们 / 想和老公一起读 / 以后想配图……"></textarea>
+
+      <div class="note-actions">
+        <button id="saveNote" type="button">保存批注</button>
+        <button id="copyCard" type="button">找老公共读</button>
+      </div>
+
+      <h3>本篇记录</h3>
+      <div id="notesList" class="notes-list"></div>
+    </aside>
+  </main>
+
+  <template id="paragraphTemplate">
+    <p class="para" tabindex="0"></p>
+  </template>
+
+  <template id="imageTemplate">
+    <figure class="image-page" tabindex="0">
+      <img alt="导入的图片" />
+      <figcaption></figcaption>
+    </figure>
+  </template>
+
+  <script src="./app.js"></script>
+</body>
+</html>

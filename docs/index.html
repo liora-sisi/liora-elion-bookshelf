@@ -21,7 +21,10 @@
     <section class="panel shelf-panel" aria-label="书架">
       <div class="section-title">
         <h2>书架</h2>
-        <button id="loadDemo" type="button">载入示例</button>
+        <div class="toolbar-mini">
+          <button id="loadDemo" type="button">载入示例</button>
+          <button id="clearShelf" class="ghost" type="button">清空</button>
+        </div>
       </div>
 
       <label class="import-box">
@@ -39,7 +42,7 @@
           <option value="utf-16be">UTF-16 BE</option>
         </select>
       </label>
-      <p class="hint">导入后若仍乱码，先删除那本，再切换编码重新导入。</p>
+      <p class="hint">导入后若仍乱码，点「清空」，再切换编码重新导入。</p>
 
       <div id="bookList" class="book-list"></div>
     </section>

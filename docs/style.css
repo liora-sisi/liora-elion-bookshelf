@@ -146,12 +146,19 @@ h3 { margin: 1rem 0 0.5rem; font-size: 0.98rem; }
   padding: 0.58rem 0.75rem;
 }
 
-.hint {
+.hint, .import-status {
   color: var(--muted);
   font-size: 0.82rem;
   line-height: 1.5;
+}
+
+.hint { margin-bottom: 0.35rem; }
+.import-status {
+  min-height: 1.25rem;
   margin-bottom: 1rem;
 }
+.import-status.ok { color: var(--accent); }
+.import-status.error { color: #9c3f37; }
 
 .book-list { display: grid; gap: 0.65rem; }
 .book-card {

@@ -1,0 +1,10 @@
+{
+  "name": "Liora × Elion 小书架",
+  "short_name": "小书架",
+  "description": "A small mobile-first reading shelf for text, images, bookmarks, highlights, and shared reading notes.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f4ede3",
+  "theme_color": "#f4ede3",
+  "lang": "zh-CN"
+}

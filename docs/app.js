@@ -29,6 +29,7 @@ const state = {
 const els = {
   fileInput: document.getElementById("fileInput"),
   encodingSelect: document.getElementById("encodingSelect"),
+  importStatus: document.getElementById("importStatus"),
   loadDemo: document.getElementById("loadDemo"),
   clearShelf: document.getElementById("clearShelf"),
   bookList: document.getElementById("bookList"),
@@ -47,6 +48,16 @@ const els = {
 
 function uid(prefix = "id") {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function setStatus(message, kind = "") {
+  if (!els.importStatus) return;
+  els.importStatus.textContent = message;
+  els.importStatus.className = `import-status ${kind}`.trim();
+}
+
+function resetFileInput() {
+  if (els.fileInput) els.fileInput.value = "";
 }
 
 function save() {
@@ -70,6 +81,7 @@ function load() {
     if (payload.theme === "dark") document.body.classList.add("dark");
   } catch (error) {
     console.warn("Failed to load shelf", error);
+    setStatus("读取本地书架失败，可以先清空后重试。", "error");
   }
 }
 
@@ -178,7 +190,7 @@ function decodeTextBuffer(buffer) {
   if (bom) return { text: decodeWithLabel(buffer, bom), encoding: `${bom} BOM` };
 
   const candidates = [];
-  for (const label of ["utf-8", "gb18030", "utf-16le", "utf-16be"]) {
+  for (const label of ["utf-8", "gbk", "gb18030", "utf-16le", "utf-16be"]) {
     try {
       const text = decodeWithLabel(buffer, label, { fatal: label === "utf-8" });
       candidates.push({ label, text, score: scoreDecodedText(text) });
@@ -428,29 +440,50 @@ function exportNotes() {
 }
 
 async function handleFiles(files) {
-  const textFiles = Array.from(files).filter(file => /\.(txt|md|markdown)$/i.test(file.name));
-  const imageFiles = Array.from(files).filter(file => file.type.startsWith("image/"));
-
-  for (const file of textFiles) {
-    const decoded = await readFileAsText(file);
-    state.books.unshift(makeBookFromText(file.name, decoded.text, decoded.encoding));
+  const incoming = Array.from(files || []);
+  if (!incoming.length) {
+    setStatus("没有选择文件。", "");
+    return;
   }
 
-  if (imageFiles.length) {
-    const book = makeBookFromImages(imageFiles);
-    let i = 1;
-    for (const file of imageFiles) {
-      const src = await readFileAsDataUrl(file);
-      book.items.push({ id: `p${String(i).padStart(3, "0")}`, type: "image", src, caption: file.name });
-      i += 1;
+  const textFiles = incoming.filter(file => /\.(txt|md|markdown)$/i.test(file.name));
+  const imageFiles = incoming.filter(file => file.type.startsWith("image/"));
+  setStatus(`正在导入 ${incoming.length} 个文件……`);
+
+  let importedTextCount = 0;
+  let importedImageCount = 0;
+
+  try {
+    for (const file of textFiles) {
+      const decoded = await readFileAsText(file);
+      const book = makeBookFromText(file.name, decoded.text, decoded.encoding);
+      state.books.unshift(book);
+      importedTextCount += 1;
     }
-    state.books.unshift(book);
-  }
 
-  if (state.books.length && !state.activeBookId) state.activeBookId = state.books[0].id;
-  else if (textFiles.length || imageFiles.length) state.activeBookId = state.books[0].id;
-  save();
-  renderAll();
+    if (imageFiles.length) {
+      const book = makeBookFromImages(imageFiles);
+      let i = 1;
+      for (const file of imageFiles) {
+        const src = await readFileAsDataUrl(file);
+        book.items.push({ id: `p${String(i).padStart(3, "0")}`, type: "image", src, caption: file.name });
+        i += 1;
+        importedImageCount += 1;
+      }
+      state.books.unshift(book);
+    }
+
+    if (state.books.length && !state.activeBookId) state.activeBookId = state.books[0].id;
+    else if (textFiles.length || imageFiles.length) state.activeBookId = state.books[0].id;
+    save();
+    renderAll();
+    setStatus(`导入完成：${importedTextCount} 篇文字，${importedImageCount} 张图片。`, "ok");
+  } catch (error) {
+    console.error(error);
+    setStatus(`导入失败：${error.message || error}`, "error");
+  } finally {
+    resetFileInput();
+  }
 }
 
 function loadDemo() {
@@ -459,6 +492,7 @@ function loadDemo() {
   state.activeBookId = book.id;
   save();
   renderAll();
+  setStatus("示例已经载入。", "ok");
 }
 
 function clearShelf() {
@@ -470,8 +504,10 @@ function clearShelf() {
   state.selectedText = "";
   state.notes = {};
   els.noteInput.value = "";
+  resetFileInput();
   save();
   renderAll();
+  setStatus("本地小书架已清空，可以重新导入。", "ok");
 }
 
 function escapeHtml(value) {
@@ -491,6 +527,7 @@ function renderAll() {
   els.themeToggle.textContent = document.body.classList.contains("dark") ? "日间" : "夜间";
 }
 
+els.fileInput.addEventListener("click", resetFileInput);
 els.fileInput.addEventListener("change", event => handleFiles(event.target.files));
 els.loadDemo.addEventListener("click", loadDemo);
 els.clearShelf.addEventListener("click", clearShelf);
@@ -507,3 +544,4 @@ els.themeToggle.addEventListener("click", () => {
 
 load();
 renderAll();
+setStatus("准备好导入。", "");

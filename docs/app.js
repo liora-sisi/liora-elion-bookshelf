@@ -1,4 +1,5 @@
 const STORAGE_KEY = "liora-elion-bookshelf.v1";
+const PROBE_LABELS = ["utf-8", "gbk", "gb18030", "utf-16le", "utf-16be", "big5"];
 
 const demoText = `# 第一页：欢迎来到小书架
 
@@ -29,6 +30,7 @@ const state = {
 const els = {
   fileInput: document.getElementById("fileInput"),
   encodingSelect: document.getElementById("encodingSelect"),
+  encodingProbe: document.getElementById("encodingProbe"),
   importStatus: document.getElementById("importStatus"),
   loadDemo: document.getElementById("loadDemo"),
   clearShelf: document.getElementById("clearShelf"),
@@ -126,9 +128,10 @@ function splitTextIntoItems(text) {
 
 function makeBookFromText(fileName, text, encodingLabel = "auto") {
   const parsed = splitTextIntoItems(text);
+  const titleSuffix = encodingLabel && !encodingLabel.includes("auto") && !encodingLabel.includes("demo") ? ` [${encodingLabel}]` : "";
   return {
     id: uid("book"),
-    title: parsed.title || fileName.replace(/\.(txt|md|markdown)$/i, ""),
+    title: `${parsed.title || fileName.replace(/\.(txt|md|markdown)$/i, "")}${titleSuffix}`,
     sourceName: fileName,
     encoding: encodingLabel,
     kind: "text",
@@ -153,6 +156,14 @@ function decodeWithLabel(buffer, label, options = {}) {
   return decoder.decode(buffer);
 }
 
+function safeDecodeWithLabel(buffer, label, options = {}) {
+  try {
+    return { label, text: decodeWithLabel(buffer, label, options), error: null };
+  } catch (error) {
+    return { label, text: "", error };
+  }
+}
+
 function detectBom(bytes) {
   if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return "utf-8";
   if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) return "utf-16le";
@@ -166,10 +177,11 @@ function scoreDecodedText(text) {
   const controls = (text.match(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g) || []).length;
   const latin1 = (text.match(/[\u00c0-\u00ff]/g) || []).length;
   const cjk = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  const kana = (text.match(/[\u3040-\u30ff]/g) || []).length;
   const length = Math.max(text.length, 1);
   let score = replacement * 100 + mojibakeWords * 35 + controls * 30;
-  if (latin1 > cjk * 2 && latin1 / length > 0.04) score += latin1 * 3;
-  if (cjk > 0) score -= Math.min(cjk, 200) * 0.2;
+  if (latin1 > (cjk + kana) * 2 && latin1 / length > 0.04) score += latin1 * 3;
+  if (cjk + kana > 0) score -= Math.min(cjk + kana, 200) * 0.2;
   return score;
 }
 
@@ -178,25 +190,19 @@ function decodeTextBuffer(buffer) {
   const selected = els.encodingSelect?.value || "auto";
 
   if (selected !== "auto") {
-    try {
-      return { text: decodeWithLabel(buffer, selected), encoding: selected };
-    } catch (error) {
-      console.warn(`Manual encoding ${selected} failed`, error);
-      return { text: decodeWithLabel(buffer, "utf-8"), encoding: "utf-8 fallback" };
-    }
+    const decoded = safeDecodeWithLabel(buffer, selected);
+    if (!decoded.error) return { text: decoded.text, encoding: selected };
+    console.warn(`Manual encoding ${selected} failed`, decoded.error);
+    return { text: decodeWithLabel(buffer, "utf-8"), encoding: "utf-8 fallback" };
   }
 
   const bom = detectBom(bytes);
   if (bom) return { text: decodeWithLabel(buffer, bom), encoding: `${bom} BOM` };
 
   const candidates = [];
-  for (const label of ["utf-8", "gbk", "gb18030", "utf-16le", "utf-16be"]) {
-    try {
-      const text = decodeWithLabel(buffer, label, { fatal: label === "utf-8" });
-      candidates.push({ label, text, score: scoreDecodedText(text) });
-    } catch (error) {
-      candidates.push({ label, text: "", score: Number.POSITIVE_INFINITY });
-    }
+  for (const label of PROBE_LABELS) {
+    const decoded = safeDecodeWithLabel(buffer, label, { fatal: label === "utf-8" });
+    candidates.push({ label, text: decoded.text, score: decoded.error ? Number.POSITIVE_INFINITY : scoreDecodedText(decoded.text) });
   }
 
   candidates.sort((a, b) => a.score - b.score);
@@ -204,19 +210,29 @@ function decodeTextBuffer(buffer) {
   return { text: best.text, encoding: `${best.label} auto` };
 }
 
-function readFileAsText(file) {
+function decodeTextBufferAllWays(buffer) {
+  return PROBE_LABELS
+    .map(label => {
+      const decoded = safeDecodeWithLabel(buffer, label);
+      if (decoded.error) return null;
+      return { text: decoded.text, encoding: label, score: scoreDecodedText(decoded.text) };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.score - b.score);
+}
+
+function readFileAsArrayBuffer(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        resolve(decodeTextBuffer(reader.result));
-      } catch (error) {
-        reject(error);
-      }
-    };
+    reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
     reader.readAsArrayBuffer(file);
   });
+}
+
+async function readFileAsText(file) {
+  const buffer = await readFileAsArrayBuffer(file);
+  return decodeTextBuffer(buffer);
 }
 
 function readFileAsDataUrl(file) {
@@ -448,6 +464,7 @@ async function handleFiles(files) {
 
   const textFiles = incoming.filter(file => /\.(txt|md|markdown)$/i.test(file.name));
   const imageFiles = incoming.filter(file => file.type.startsWith("image/"));
+  const rescueMode = !!els.encodingProbe?.checked;
   setStatus(`正在导入 ${incoming.length} 个文件……`);
 
   let importedTextCount = 0;
@@ -455,10 +472,20 @@ async function handleFiles(files) {
 
   try {
     for (const file of textFiles) {
-      const decoded = await readFileAsText(file);
-      const book = makeBookFromText(file.name, decoded.text, decoded.encoding);
-      state.books.unshift(book);
-      importedTextCount += 1;
+      if (rescueMode) {
+        const buffer = await readFileAsArrayBuffer(file);
+        const decodedVersions = decodeTextBufferAllWays(buffer);
+        for (const decoded of decodedVersions) {
+          const book = makeBookFromText(file.name, decoded.text, `${decoded.encoding} test`);
+          state.books.unshift(book);
+          importedTextCount += 1;
+        }
+      } else {
+        const decoded = await readFileAsText(file);
+        const book = makeBookFromText(file.name, decoded.text, decoded.encoding);
+        state.books.unshift(book);
+        importedTextCount += 1;
+      }
     }
 
     if (imageFiles.length) {
@@ -477,7 +504,8 @@ async function handleFiles(files) {
     else if (textFiles.length || imageFiles.length) state.activeBookId = state.books[0].id;
     save();
     renderAll();
-    setStatus(`导入完成：${importedTextCount} 篇文字，${importedImageCount} 张图片。`, "ok");
+    const rescueNote = rescueMode ? "（已生成多种编码版本，点开正常的那本即可。）" : "";
+    setStatus(`导入完成：${importedTextCount} 篇文字，${importedImageCount} 张图片。${rescueNote}`, "ok");
   } catch (error) {
     console.error(error);
     setStatus(`导入失败：${error.message || error}`, "error");

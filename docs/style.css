@@ -146,6 +146,18 @@ h3 { margin: 1rem 0 0.5rem; font-size: 0.98rem; }
   padding: 0.58rem 0.75rem;
 }
 
+.probe-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin: 0.55rem 0 0.35rem;
+}
+
+.probe-row input { margin-top: 0.18rem; }
+
 .hint, .import-status {
   color: var(--muted);
   font-size: 0.82rem;

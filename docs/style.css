@@ -66,6 +66,15 @@ button.ghost { background: transparent; }
   text-transform: uppercase;
 }
 
+.version {
+  display: inline-block;
+  vertical-align: middle;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 400;
+  margin-left: 0.35rem;
+}
+
 h1, h2, h3, p { margin-top: 0; }
 h1 { margin-bottom: 0; font-size: clamp(1.8rem, 6vw, 3rem); }
 h2 { margin-bottom: 0.65rem; font-size: 1.12rem; }
